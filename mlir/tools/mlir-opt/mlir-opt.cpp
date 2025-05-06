@@ -159,6 +159,7 @@ void registerTestVectorReductionToSPIRVDotProd();
 void registerTestVulkanRunnerPipeline();
 void registerTestWrittenToPass();
 void registerTestGpuTileSelectionPass();
+void registerTestGpuTileAndFusePass();
 #if MLIR_ENABLE_PDL_IN_PATTERNMATCH
 void registerTestDialectConversionPasses();
 void registerTestPDLByteCodePass();
@@ -303,6 +304,7 @@ void registerTestPasses() {
   mlir::test::registerTestVulkanRunnerPipeline();
   mlir::test::registerTestWrittenToPass();
   mlir::test::registerTestGpuTileSelectionPass();
+  mlir::test::registerTestGpuTileAndFusePass();
 #if MLIR_ENABLE_PDL_IN_PATTERNMATCH
   mlir::test::registerTestDialectConversionPasses();
   mlir::test::registerTestPDLByteCodePass();
