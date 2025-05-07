@@ -10,47 +10,15 @@
 #include "llvm/Support/Casting.h"
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
+#include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"   // helper
+#include "mlir/Interfaces/TilingInterface.h"                  // TilingInterface
+#include "mlir/IR/PatternMatch.h"                             // PatternRewriter
 
 using namespace mlir;
 // using namespace mlir::gpu;
 
 namespace {
 
-// /// Calculate dimensional reuse (γ) for each dimension in a linalg operation
-// static SmallVector<double> calculateDimensionalReuse(Operation *op) {
-//   // Implement your dimensional reuse calculation algorithm here
-//   // based on the paper you shared
-  
-//   // Example implementation:
-//   SmallVector<double> reuse;
-//   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-//     unsigned numDims = linalgOp.getNumLoops();
-//     reuse.resize(numDims, 0.0);
-
-//     // ANalyse each opperands access pattterns 
-//     for (OpOperand &opOperand : linalgOp->getOperands()) {
-//       // skip opperands that don't have affine access patterns
-//       if (!linalgOp.hasPureBufferSemantics() && !linalgOp.hasPureTensorSemantics())
-//         continue;
-      
-
-//       AffineMap accessMap;
-//       if (linalgOp.hasPureBufferSemantics()) {
-      
-//       }
-//     }
-    
-//     // Calculate reuse factors for each dimension
-//     // (simplified example)
-//     if (numDims >= 3) {
-//       reuse[0] = 0.5;  // Less reuse in outer dimension
-//       reuse[1] = 1.0;  // Medium reuse in middle dimension
-//       reuse[2] = 2.0;  // More reuse in inner dimension
-//     }
-//   }
-  
-//   return reuse;
-// }
 
 static bool hasReuseDimension(AffineExpr expr, unsigned dim) {
   // Helper to check if a dimension contributes to an affine expression
@@ -76,14 +44,6 @@ static SmallVector<double> calculateDimensionalReuse(Operation *op) {
       // Skip operands that don't have affine access patterns
       if (!linalgOp.hasPureBufferSemantics() && !linalgOp.hasPureTensorSemantics())
         continue;
-        
-      // AffineMap accessMap;
-      // if (linalgOp.hasPureBufferSemantics())
-      //   // accessMap = linalgOp.getIndexingMapIndex(&opOperand);
-      //   accessMap = linalgOp.getIndexingMapIndex(&opOperand);
-      // else
-      //   // accessMap = linalgOp.getTiedIndexingMap(&opOperand);
-      //   accessMap = linalgOp.getMatchingIndexingMap(&opOperand);
 
       AffineMap accessMap = linalgOp.getMatchingIndexingMap(&opOperand);
         
@@ -119,28 +79,7 @@ static SmallVector<double> calculateDimensionalReuse(Operation *op) {
 
 
 
-/// Solve the reuse polynomial to determine tile sizes
-// static SmallVector<int64_t> computeTileSizes(ArrayRef<double> reuse, int64_t cacheSize) {
-//   // Implement algorithm from the paper for computing tile sizes
-//   // based on cache size and reuse factors
-  
-//   unsigned numDims = reuse.size();
-//   SmallVector<int64_t> tileSizes(numDims);
-  
-//   // Example implementation (simplified):
-//   double totalReuse = 0.0;
-//   for (double r : reuse)
-//     totalReuse += r;
-  
-//   // Distribute cache space proportionally to reuse
-//   for (unsigned i = 0; i < numDims; ++i) {
-//     double ratio = reuse[i] / totalReuse;
-//     int64_t tileSize = static_cast<int64_t>(std::sqrt(cacheSize * ratio));
-//     tileSizes[i] = std::max(int64_t(16), std::min(int64_t(256), tileSize));
-//   }
-  
-//   return tileSizes;
-// }
+
 /// Solve the reuse polynomial to determine tile sizes
 static SmallVector<int64_t> computeTileSizes(ArrayRef<double> reuse, int64_t cacheSize) {
   unsigned numDims = reuse.size();
@@ -201,149 +140,7 @@ bool hasProducerConsumerRelation(Operation *producer, Operation *consumer) {
   return false;
 }
 
-// Function to fuse operations with producer-consumer relationship
-// static void fuseProducerConsumer(Operation *producer, Operation *consumer, 
-//                          ArrayRef<int64_t> tileSizes, 
-//                          PatternRewriter &rewriter) {
-//   // ── Step 1.  Find the *consumer operand* that points at the producer result.
-//   OpOperand *use = nullptr;
-//   for (OpOperand &operand : consumer->getOpOperands())
-//     if (operand.get().getDefiningOp() == producer) {
-//       use = &operand;
-//       break;
-//     }
-//   if (!use)
-//     return;                    // nothing to fuse  (shouldn’t happen in your pass)
-  
-//   // ── Step 2.  Ask Linalg to perform the fusion.  The 2‑arg overload expects
-//   //            (OpBuilder&, OpOperand&).  It stitches the producer’s computation
-//   //            right before the consumer *inside* the consumer’s loop nest.
-//   FailureOr<linalg::FusionInfo> fused =
-//       linalg::fuseProducerOfTensor(rewriter, *use);
-//   if (failed(fused))
-//     return;                    // fusion deemed illegal => silently skip
-  
-//   // After fusion we get (potentially) new producer / consumer handles:
-//   Operation *fusedProducer = fused->fusedProducer ? fused->fusedProducer
-//                                                   : producer;
-//   Operation *consumerToTile = consumer; // unchanges
-  
-//     // ── Step 3.  Tile both operations with the same sizes.
-//   //     NOTE:  applyTiling erases the original op, so always call it *last*.
-//   mlir::gpu::applyTiling(rewriter, fusedProducer, tileSizes);
-//   mlir::gpu::applyTiling(rewriter, consumerToTile, tileSizes);
-  
-//   // // Get lcoations for the operations
-//   // Location producerLoc = producer->getLoc();
-//   // Location consumerLoc = consumer->getLoc();
 
-//   // // Cast to LinalgOps for proper handling
-//   // auto producerOp = dyn_cast<linalg::LinalgOp>(producer);
-//   // auto consumerOp = dyn_cast<linalg::LinalgOp>(consumer);
-
-//   // if (!producerOp || !consumerOp) {
-//   //   // If either operation is not a LinalgOp, we can't fuse them
-//   //   llvm::errs() << "Cannot fuse operations that are not LinalgOps\n";
-//   //   return;
-//   // }
-
-//   // // Set up fusion options
-//   // linalg::LinalgTilingOptions tilingOptions;
-//   // tilingOptions = tilingOptions.setTileSizes(tileSizes);
-
-//   // Value fusionValue = nullptr;
-//   // for (Value result : producer->getResults()) {
-//   //   for (OpOperand &use : result.getUses()) {
-//   //     if (use.getOwner() == consumer) {
-//   //       fusionValue = result;
-//   //       break;
-//   //     }
-//   //   }
-//   //   if (fusionValue)
-//   //     break;
-//   // }
-
-//   // if (!fusionValue) {
-//   //   llvm::errs() << "No direct producer-consumer relationship found\n";
-//   //   return;
-//   // }
-  
-//   // // Use linalg's fusion utilities
-//   // FailureOr<linalg::FusionInfo> fusionInfo = linalg::fuseProducerOfTensor(
-//   //     rewriter, fusionValue, tilingOptions);
-  
-//   // if (failed(fusionInfo)) {
-//   //   llvm::errs() << "Fusion failed\n";
-//   //   return;
-//   // }
-
-//   // // Successfully fused - now need to cleanup
-  
-//   // // Depending on fusion approach, we might need to erase the original ops
-//   // // or they might have been replaced already by the fusion utilities
-  
-//   // // Check if the operations are still valid and need to be erased
-//   // // if (!producer->isOpBeingReplaced() && !producer->use_empty())
-//   // //   rewriter.eraseOp(producer);
-  
-//   // // if (!consumer->isOpBeingReplaced() && !consumer->use_empty())
-//   // //   rewriter.eraseOp(consumer);
-  
-//   llvm::errs() << "Successfully fused producer and consumer operations\n";
-  
-  
-//   // // Create a fusion group
-//   // OpBuilder builder(producer);
-//   // Location loc = producer->getLoc();
-  
-//   // Apply tiling to both operations with the same tile sizes
-//   // This ensures they can be fused
-  
-//   // For real implementation, use the transform dialect's tileAndFuse operation
-//   // or implement custom fusion logic
-// }
-
-/// Tiles producer & consumer with the same sizes, then fuses the producer slice
-/// into the consumer.  Works on current MLIR main.p
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Tiles PRODUCER and CONSUMER with the SAME sizes, then fuses the producer
-// slice into the consumer.  Works on current MLIR main.
-// ──────────────────────────────────────────────────────────────────────────────
-// static void fuseProducerConsumer(Operation        *producer,
-//                                  Operation        *consumer,
-//                                  ArrayRef<int64_t> tileSizes,
-//                                  PatternRewriter  &rewriter) {
-//   // Build tiling options once.
-//   linalg::LinalgTilingOptions opt;
-//   opt = opt.setTileSizes(tileSizes);
-
-//   // ── Tile producer ──────────────────────────────────────────────────────────
-//   rewriter.setInsertionPoint(producer);
-//   auto tiledProd = linalg::tileLinalgOp(
-//         rewriter, cast<linalg::LinalgOp>(producer), opt);
-//   if (failed(tiledProd)) return;
-//   Operation *newProducer = tiledProd->op;   // keep handle
-
-//   // ── Tile consumer ──────────────────────────────────────────────────────────
-//   rewriter.setInsertionPoint(consumer);
-//   auto tiledCons = linalg::tileLinalgOp(
-//         rewriter, cast<linalg::LinalgOp>(consumer), opt);
-//   if (failed(tiledCons)) return;
-//   Operation *newConsumer = tiledCons->op;
-
-//   // ── Find the operand that links them ───────────────────────────────────────
-//   OpOperand *use = nullptr;
-//   for (OpOperand &o : newConsumer->getOpOperands())
-//     if (o.get().getDefiningOp() == newProducer) { use = &o; break; }
-//   if (!use) return; // shapes didn’t match → skip
-
-//   // ── Fuse ───────────────────────────────────────────────────────────────────
-//   if (succeeded(linalg::fuseProducerOfTensor(rewriter, *use)))
-//     llvm::errs() << "fusion OK\n";
-//   else
-//     llvm::errs() << "fusion FAILED after tiling\n";
-// }
 
 
 void addPrefetching(Operation *tiledOp) {
@@ -380,14 +177,53 @@ void addPrefetching(Operation *tiledOp) {
 } // end of namespace
 
 SmallVector<int64_t> mlir::gpu::calculateOptimalTileSizes(Operation *op) {
+  auto linalgOp = dyn_cast_if_present<linalg::LinalgOp>(op);
+  if (!linalgOp)            // <-- extra safety
+    return {64, 64, 64};    // or whatever your default is
   // Get reuse factors for each dimension
-  SmallVector<double> reuse = calculateDimensionalReuse(op);
+  // SmallVector<double> reuse = calculateDimensionalReuse(op);
   
-  // Compute tile sizes based on GPU L1 cache size (typically around 48KB)
-  const int64_t gpuL1CacheSize = 48 * 1024;
+  // 1. Use 64 KB by default (or let the user pass it via module attr)
+  int64_t sharedMemBytes = 64 * 1024;   // 65 536 B
+  if (auto attr = op->getParentOfType<ModuleOp>()
+                 ->getAttrOfType<IntegerAttr>("gpu.smem_kb"))
+    sharedMemBytes = attr.getInt() * 1024;                  // allow override
   // return computeTileSizes(reuse, gpuL1CacheSize);
-  SmallVector<int64_t> sizes = computeTileSizes(reuse, gpuL1CacheSize);
-  for (auto &s : sizes) s = std::min<int64_t>(s, 64);   // problem‑size guard
+  constexpr int64_t bytesPerElem = 4;                 // f32
+  int64_t cacheElems = sharedMemBytes / bytesPerElem; // ***convert***
+
+  // ────────────────────────────────────────────────────────────────
+  // 2.  Solve for τ and get the raw tile sizes
+  // ────────────────────────────────────────────────────────────────
+  SmallVector<double> reuse = calculateDimensionalReuse(op);
+  SmallVector<int64_t> sizes = computeTileSizes(reuse, cacheElems);
+  //  (computeTileSizes now gets a *capacity‑in‑elements*, so no change there)
+
+  /// ────────────────────────────────────────────────────────────────
+  // 3.  Warp‑friendly round‑down (multiple of 8) and clamp
+  //     to the static problem shape so we never exceed 64×64 etc.
+  // ────────────────────────────────────────────────────────────────
+  auto staticShape = linalgOp.getStaticLoopRanges();  // {64,64,128} for GEMM
+  for (unsigned i = 0; i < sizes.size(); ++i) {
+    sizes[i] = (sizes[i] / 8) * 8;                    // align
+    sizes[i] = std::max<int64_t>(8, sizes[i]);
+    if (staticShape[i] > 0)                           // ‑1 == dynamic
+      sizes[i] = std::min<int64_t>(sizes[i], staticShape[i]);
+  }
+
+  // ────────────────────────────────────────────────────────────────
+  // 4.  If footprint > shared‑mem, shrink all dims together
+  // ────────────────────────────────────────────────────────────────
+  auto footprintBytes = [&](ArrayRef<int64_t> ts) {
+    int64_t ij = ts[0] * ts[1];
+    int64_t jk = (ts.size() > 2 ? ts[1] * ts[2] : 0);
+    int64_t ki = (ts.size() > 2 ? ts[2] * ts[0] : 0);
+    return (ij + jk + ki) * bytesPerElem;    // 4 B/float
+  };
+
+  while (footprintBytes(sizes) > sharedMemBytes) {
+    for (auto &s : sizes) s = std::max<int64_t>(8, s - 8);            // shrink one “chunk”
+  }
   return sizes;
 }
 
@@ -402,66 +238,178 @@ namespace mlir {
   //   trimmed.assign(sizes.begin(), sizes.begin() + loops);
   //   return trimmed;
   // }
-  SmallVector<int64_t> fitTileSizesToOp(Operation *op, ArrayRef<int64_t> tileSizes) {
-    if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-      unsigned numLoops = linalgOp.getNumLoops();
-      SmallVector<int64_t> result;
-      result.reserve(numLoops);
-      
-      // Copy tile sizes up to the number of loops
-      for (unsigned i = 0; i < std::min(numLoops, static_cast<unsigned>(tileSizes.size())); ++i) {
-        result.push_back(tileSizes[i]);
-      }
-      
-      // Pad with default sizes if needed
-      while (result.size() < numLoops) {
-        result.push_back(64); // Default tile size
-      }
-      
-      return result;
-    }
-    return SmallVector<int64_t>(tileSizes);
-  }
+SmallVector<int64_t>
+fitTileSizesToOp(Operation *op, ArrayRef<int64_t> sizes) {
+  unsigned nLoops =
+      cast<TilingInterface>(op).getLoopIteratorTypes().size();
+  SmallVector<int64_t> out;
 
-  bool fuseProducerConsumer(PatternRewriter &rewriter,
-    Operation *producer, 
-    Operation *consumer,
-    ArrayRef<int64_t> tileSizes) {
-// First tile the producer
-rewriter.setInsertionPoint(producer);
-auto producerOp = dyn_cast<linalg::LinalgOp>(producer);
-if (!producerOp) return false;
+  // copy as many as we have loops
+  out.append(sizes.begin(),
+             sizes.begin() + std::min<size_t>(nLoops, sizes.size()));
 
-linalg::LinalgTilingOptions producerOptions;
-producerOptions = producerOptions.setTileSizes(tileSizes);
-
-auto tiledProducer = linalg::tileLinalgOp(rewriter, producerOp, producerOptions);
-if (failed(tiledProducer)) return false;
-
-// Get the new producer operation after tiling
-Operation *newProducer = tiledProducer->op;
-
-// Now tile the consumer with compatible tile sizes
-rewriter.setInsertionPoint(consumer);
-auto consumerOp = dyn_cast<linalg::LinalgOp>(consumer);
-if (!consumerOp) return false;
-
-// Adapt tile sizes for the consumer
-SmallVector<int64_t> consumerTileSizes = fitTileSizesToOp(consumer, tileSizes);
-
-linalg::LinalgTilingOptions consumerOptions;
-consumerOptions = consumerOptions.setTileSizes(consumerTileSizes);
-
-auto tiledConsumer = linalg::tileLinalgOp(rewriter, consumerOp, consumerOptions);
-if (failed(tiledConsumer)) return false;
-
-// Instead of directly trying to fuse, which may cause issues with the current setup,
-// we'll simply ensure both operations are tiled with compatible tile sizes
-// and let the compiler's other passes handle the fusion
-
-return true;
+  // pad with zeros for “no‑tile” on leftover loops
+  out.resize(nLoops, /*zero‑tile =*/0);
+  return out;
 }
+
+  // SmallVector<int64_t> fitTileSizesToOp(Operation *op, ArrayRef<int64_t> tileSizes) {
+  //   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
+  //     unsigned numLoops = linalgOp.getNumLoops();
+  //     SmallVector<int64_t> result;
+  //     result.reserve(numLoops);
+      
+  //     // Copy tile sizes up to the number of loops
+  //     for (unsigned i = 0; i < std::min(numLoops, static_cast<unsigned>(tileSizes.size())); ++i) {
+  //       result.push_back(tileSizes[i]);
+  //     }
+      
+  //     // Pad with default sizes if needed
+  //     while (result.size() < numLoops) {
+  //       result.push_back(64); // Default tile size
+  //     }
+      
+  //     return result;
+  //   }
+  //   return SmallVector<int64_t>(tileSizes);
+  // }
+
+//   bool fuseProducerConsumer(PatternRewriter &rewriter,
+//     Operation *producer, 
+//     Operation *consumer,
+//     ArrayRef<int64_t> tileSizes) {
+// // First tile the producer
+// rewriter.setInsertionPoint(producer);
+// auto producerOp = dyn_cast<linalg::LinalgOp>(producer);
+// if (!producerOp) return false;
+
+// linalg::LinalgTilingOptions producerOptions;
+// producerOptions = producerOptions.setTileSizes(tileSizes);
+
+// auto tiledProducer = linalg::tileLinalgOp(rewriter, producerOp, producerOptions);
+// if (failed(tiledProducer)) return false;
+
+// // Get the new producer operation after tiling
+// Operation *newProducer = tiledProducer->op;
+
+// // Now tile the consumer with compatible tile sizes
+// rewriter.setInsertionPoint(consumer);
+// auto consumerOp = dyn_cast<linalg::LinalgOp>(consumer);
+// if (!consumerOp) return false;
+
+// // Adapt tile sizes for the consumer
+// SmallVector<int64_t> consumerTileSizes = fitTileSizesToOp(consumer, tileSizes);
+
+// linalg::LinalgTilingOptions consumerOptions;
+// consumerOptions = consumerOptions.setTileSizes(consumerTileSizes);
+
+// auto tiledConsumer = linalg::tileLinalgOp(rewriter, consumerOp, consumerOptions);
+// if (failed(tiledConsumer)) return false;
+
+// // Instead of directly trying to fuse, which may cause issues with the current setup,
+// // we'll simply ensure both operations are tiled with compatible tile sizes
+// // and let the compiler's other passes handle the fusion
+
+// return true;
+// }
+  /// Implementation of tileAndFuseConsumerWithProducers
+//   bool fuseProducerConsumer(PatternRewriter &rewriter,
+//     linalg::LinalgOp producer,
+//     linalg::LinalgOp consumer,
+//     ArrayRef<int64_t> tileSizes) {
+
+// // We only need to call this on the **consumer**; the helper finds and fuses
+// // its producers automatically.
+// rewriter.setInsertionPoint(consumer);
+
+// linalg::LinalgTilingOptions tiling;
+// tiling.setTileSizes(tileSizes);
+
+// linalg::LinalgFusionOptions fusion;
+// fusion.controlFoldingFn =
+// [](Operation *prod, Operation *cons) { return true; }; // fuse everything
+
+// FailureOr<linalg::TileLoopNest> fused =
+// linalg::tileAndFuseLinalgOps(rewriter, consumer, tiling, fusion);
+
+// return succeeded(fused);
+// }
+
+// Convert int64 -> constant OpFoldResult.
+static SmallVector<OpFoldResult>
+asConstantMixedSizes(OpBuilder &b, ArrayRef<int64_t> sizes) {
+  SmallVector<OpFoldResult> mixed;
+  mixed.reserve(sizes.size());
+  for (int64_t sz : sizes)
+    mixed.push_back(b.getIndexAttr(sz));
+  return mixed;
+}
+/// Tiles the `consumer` op (which must implement `TilingInterface`) and
+/// greedily fuses all its in‑block producers.  Returns `true` on success.
+/// Tiles `consumer` (implements TilingInterface) and greedily fuses all
+/// in‑block producers using the up‑to‑date SCF helpers.
+bool tileAndFuseWithSCF(PatternRewriter &rewriter,
+  TilingInterface consumer,
+  ArrayRef<int64_t> tileSizes) {
+  // ---- 2.1 build OpFoldResult tile sizes ----
+  // SmallVector<OpFoldResult> mixed;
+  // mixed.reserve(tileSizes.size());
+  // for (int64_t sz : tileSizes)
+  // mixed.push_back(rewriter.getIndexAttr(sz));   // constant IndexAttr
+
+  unsigned nLoops = consumer.getLoopIteratorTypes().size();
+  SmallVector<int64_t> ts(tileSizes.begin(), tileSizes.end());
+  ts.resize(nLoops, 0);          // trim or pad with 0 (“don’t tile”)
+
+  // ---- 2.2 SCF tiling options ----
+  scf::SCFTilingOptions tileOpts;
+  tileOpts.setTileSizes(asConstantMixedSizes(rewriter, tileSizes));
+
+  scf::SCFTileAndFuseOptions tfOpts;
+  tfOpts.setTilingOptions(tileOpts);
+  // (optional) you can also attach a fusion‑control lambda:
+  // tfOpts.setFusionControlFn(/*ControlFnTy*/);
+
+  // --- 3. Call the plural helper ---
+  auto fused =
+  scf::tileConsumerAndFuseProducersUsingSCF(rewriter, consumer, tfOpts);
+
+  // fusing didn't succeeed
+  if (failed(fused)){
+    return false;
+  }
+// Success! Now replace/erase the original operations
   
+  // 1. Replace the consumer with appropriate values from the replacements map
+  // First get all results of the consumer
+  // Operation *consumerOp = consumer.getOperation();
+  // SmallVector<Value> replacementValues;
+ // --- 1. Replace every mapped value ---
+  for (auto &kv : fused->replacements)           // kv : <old, new>
+    rewriter.replaceAllUsesWith(kv.first, kv.second);
+  
+  // for (Value result : consumerOp->getResults()) {
+  //   // Look up the replacement in the map
+  //   if (fused->replacements.count(result)) {
+  //     replacementValues.push_back(fused->replacements[result]);
+  //   } else {
+  //     // No replacement found, use the original result
+  //     replacementValues.push_back(result);
+  //   }
+  // }
+
+  // --- 2. Erase the original consumer and all fused producers ---
+  Operation *origConsumer = consumer.getOperation();
+  rewriter.eraseOp(origConsumer);
+
+  for (Operation *op : fused->fusedProducers)
+    if (op->use_empty())                        // safety belt
+      rewriter.eraseOp(op);
+  // return succeeded(fused);
+  return true;
+}
+
+
   } // namespace gpu
   } // namespace mlir
   
@@ -472,35 +420,62 @@ return true;
 #include "mlir/Dialect/Linalg/Transforms/Transforms.h"
 #include "mlir/IR/PatternMatch.h"         // for PatternRewriter
 
+// void mlir::gpu::applyTiling(PatternRewriter &rewriter,
+//                             Operation *op,
+//                             ArrayRef<int64_t> tileSizes) {
+//   // Try to cast to a LinalgOp
+//   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
+//     assert(linalgOp && "applyTiling expects a LinalgOp");
+//     assert(tileSizes.size() == linalgOp.getNumLoops() &&
+//        "tile size vector length must equal loop nest length");
+
+//     // 1) Prepare tiling options.
+//     Location loc = op->getLoc();
+//     linalg::LinalgTilingOptions tilingOptions;
+//     tilingOptions = tilingOptions.setTileSizes(tileSizes);
+    
+//     // 2) Ensure we insert *at* the original op.
+//     rewriter.setInsertionPoint(op);
+    
+//     // 3) Invoke the tiler using the RewriterBase API.
+//     FailureOr<linalg::TiledLinalgOp> result =
+//       linalg::tileLinalgOp(rewriter, linalgOp, tilingOptions);
+    
+//     if (succeeded(result)) {
+//       // 4) Erase the original op (rewriter knows how to handle this)
+//       rewriter.eraseOp(linalgOp);
+//     }
+//   }
+
+//   // (2) The inline “convenience” wrapper also needs a body:
+// }
+
 void mlir::gpu::applyTiling(PatternRewriter &rewriter,
-                            Operation *op,
-                            ArrayRef<int64_t> tileSizes) {
-  // Try to cast to a LinalgOp
-  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    assert(linalgOp && "applyTiling expects a LinalgOp");
-    assert(tileSizes.size() == linalgOp.getNumLoops() &&
-       "tile size vector length must equal loop nest length");
+  Operation *op,
+  ArrayRef<int64_t> tileSizes) {
+auto linalgOp = dyn_cast<linalg::LinalgOp>(op);
+if (!linalgOp)
+return;
 
-    // 1) Prepare tiling options.
-    Location loc = op->getLoc();
-    linalg::LinalgTilingOptions tilingOptions;
-    tilingOptions = tilingOptions.setTileSizes(tileSizes);
-    
-    // 2) Ensure we insert *at* the original op.
-    rewriter.setInsertionPoint(op);
-    
-    // 3) Invoke the tiler using the RewriterBase API.
-    FailureOr<linalg::TiledLinalgOp> result =
-      linalg::tileLinalgOp(rewriter, linalgOp, tilingOptions);
-    
-    if (succeeded(result)) {
-      // 4) Erase the original op (rewriter knows how to handle this)
-      rewriter.eraseOp(linalgOp);
-    }
-  }
+assert(tileSizes.size() == linalgOp.getNumLoops() &&
+"tile size vector length must equal loop nest length");
 
-  // (2) The inline “convenience” wrapper also needs a body:
+linalg::LinalgTilingOptions opts;
+opts.setTileSizes(tileSizes);
+
+rewriter.setInsertionPoint(linalgOp);
+FailureOr<linalg::TiledLinalgOp> tiled =
+linalg::tileLinalgOp(rewriter, linalgOp, opts);
+if (failed(tiled))
+return;
+
+// ► Wire new results to old users *before* erasing the op.
+if (!linalgOp->getResults().empty())
+rewriter.replaceOp(linalgOp, tiled->tensorResults);
+else
+rewriter.eraseOp(linalgOp);
 }
+
 
 // 2) Convenience wrapper
 // void mlir::gpu::applyTiling(Operation *op,

@@ -57,6 +57,9 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Dialect/SCF/Transforms/TileUsingInterface.h"   // helper
+#include "mlir/Interfaces/TilingInterface.h"                  // TilingInterface
+#include "mlir/IR/PatternMatch.h"                             // PatternRewriter
 
 namespace mlir {
 
@@ -82,10 +85,22 @@ void applyTiling(::mlir::PatternRewriter &rewriter,
 
 /// Safe fusion of producer and consumer operations with compatible tile sizes.
 /// Returns true if fusion was successful.
-bool fuseProducerConsumer(PatternRewriter &rewriter,
-                          Operation *producer, 
-                          Operation *consumer,
-                          ArrayRef<int64_t> tileSizes);
+// bool fuseProducerConsumer(PatternRewriter &rewriter,
+//                           Operation *producer, 
+//                           Operation *consumer,
+//                           ArrayRef<int64_t> tileSizes);
+
+// TileSelection.h  (inside namespace mlir::gpu)
+bool tileAndFuseWithSCF(mlir::PatternRewriter &rewriter,
+    mlir::TilingInterface consumer,
+    llvm::ArrayRef<int64_t> tileSizes);
+
+
+/// Perform tiling and fusion of consumer operation with its producers.
+/// Returns success if fusion was performed.
+// LogicalResult tileAndFuseConsumerWithProducers(PatternRewriter &rewriter,
+//     linalg::LinalgOp consumerOp,
+//     ArrayRef<int64_t> tileSizes);
 
 /// Convenience wrapper that builds its own rewriter.
 void applyTiling(Operation *op, llvm::ArrayRef<int64_t> tileSizes);
