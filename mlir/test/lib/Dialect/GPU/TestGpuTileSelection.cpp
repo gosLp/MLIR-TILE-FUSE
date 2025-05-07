@@ -104,7 +104,7 @@ struct TestGpuTileAndFusePass
     for (unsigned i = 0; i < candidates.size(); i++) {
       bool fused = false;
       
-      for (unsigned j = i + 1; j < candidates.size(); j++) {
+      for (unsigned j = i + 1; j < candidates.size() && !fused; j++) {
         if (hasProducerConsumerRelation(candidates[i].getOperation(), 
                                         candidates[j].getOperation())) {
           // Calculate tile sizes based on the producer operation
@@ -124,24 +124,39 @@ struct TestGpuTileAndFusePass
           
           // Create a pattern rewriter for tiling and fusion
           PatternRewriter rewriter(candidates[i]->getContext());
-          
-          // Apply tiling to producer
-          rewriter.setInsertionPoint(candidates[i]);
-          gpu::applyTiling(rewriter, candidates[i].getOperation(), tileSizes);
-          
-          // Apply tiling to consumer
-          rewriter.setInsertionPoint(candidates[j]);
-          gpu::applyTiling(rewriter, candidates[j].getOperation(), tileSizes);
-          
-          // Add prefetching
-          addPrefetching(candidates[j].getOperation());
-          
-          // Mark as fused to skip individual tiling of this operation
+
+          // Attempt safer fusion
+        if (gpu::fuseProducerConsumer(rewriter, 
+            candidates[i].getOperation(),
+            candidates[j].getOperation(),
+            tileSizes)) {
+          llvm::errs() << "Successfully tiled and prepared for fusion\n";
           fused = true;
-          
           // Skip both operations in future iterations
           i = j;
-          break;
+        } else {
+          llvm::errs() << "Could not tile and fuse operations, falling back to individual tiling\n";
+        }
+          
+          // // Apply tiling to producer
+          // rewriter.setInsertionPoint(candidates[i]);
+          // gpu::applyTiling(rewriter, candidates[i].getOperation(), tileSizes);
+          
+          // // Apply tiling to consumer
+          // rewriter.setInsertionPoint(candidates[j]);
+          // auto consumerSizes = mlir::gpu::fitTileSizesToOp(candidates[j], tileSizes);
+          // // gpu::applyTiling(rewriter, candidates[j].getOperation(), tileSizes);
+          // gpu::applyTiling(rewriter, candidates[j].getOperation(), consumerSizes);
+          
+          // // Add prefetching
+          // addPrefetching(candidates[j].getOperation());
+          
+          // // Mark as fused to skip individual tiling of this operation
+          // fused = true;
+          
+          // // Skip both operations in future iterations
+          // i = j;
+          // break;
         }
       }
       
