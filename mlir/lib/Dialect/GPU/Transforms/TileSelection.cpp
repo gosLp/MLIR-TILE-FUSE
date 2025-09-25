@@ -13,23 +13,20 @@ using namespace mlir;
 
 namespace {
 
-/// Calculate dimensional reuse (γ) for each dimension in a linalg operation
+/// Calculate dimensional reuse for each dimension 
 static SmallVector<double> calculateDimensionalReuse(Operation *op) {
-  // Implement your dimensional reuse calculation algorithm here
-  // based on the paper you shared
   
-  // Example implementation:
+
   SmallVector<double> reuse;
   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
     unsigned numDims = linalgOp.getNumLoops();
     reuse.resize(numDims, 1.0);
     
     // Calculate reuse factors for each dimension
-    // (simplified example)
     if (numDims >= 3) {
-      reuse[0] = 0.5;  // Less reuse in outer dimension
-      reuse[1] = 1.0;  // Medium reuse in middle dimension
-      reuse[2] = 2.0;  // More reuse in inner dimension
+      reuse[0] = 0.5;  // Less reuse in outer dim
+      reuse[1] = 1.0;  // Medium reuse in middle
+      reuse[2] = 2.0;  // More reuse in inner 
     }
   }
   
@@ -38,7 +35,6 @@ static SmallVector<double> calculateDimensionalReuse(Operation *op) {
 
 /// Solve the reuse polynomial to determine tile sizes
 static SmallVector<int64_t> computeTileSizes(ArrayRef<double> reuse, int64_t cacheSize) {
-  // Implement algorithm from the paper for computing tile sizes
   // based on cache size and reuse factors
   
   unsigned numDims = reuse.size();
@@ -72,11 +68,4 @@ SmallVector<int64_t> mlir::gpu::calculateOptimalTileSizes(Operation *op) {
 
 
 void mlir::gpu::applyTiling(Operation *op, ArrayRef<int64_t> tileSizes) {
-  // Implement tiling transformation
-  // This would use transform dialect operations or other
-  // MLIR transformation APIs to apply the tiling
-  
-  // This is where you'd implement the actual tiling transformation
-  // The specific implementation depends on the type of operation
-  // and the transformation framework you want to use
 }

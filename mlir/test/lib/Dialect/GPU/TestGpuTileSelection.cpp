@@ -40,10 +40,10 @@ struct TestGpuTileSelectionPass
       if (!op->hasAttr("gpu.test_tile_selection"))
         return;
       
-      // Calculate optimal tile sizes
+      // Calculate optimal 
       SmallVector<int64_t> tileSizes = gpu::calculateOptimalTileSizes(op);
       
-      // Print the calculated tile sizes for testing
+      
       llvm::errs() << "Calculated tile sizes for operation: " 
                   << op->getName() << "\n";
       for (auto size : tileSizes)
